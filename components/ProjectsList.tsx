@@ -59,8 +59,8 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
       setEditingId(null);
   };
 
-  const handleExport = () => {
-      const data = Storage.exportAllData();
+  const handleExport = async () => {
+      const data = await Storage.exportAllData();
       const blob = new Blob([data], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -81,22 +81,21 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
           const content = event.target?.result as string;
           if (content) {
-              const success = Storage.importData(content);
+              const success = await Storage.importData(content);
               if (success) {
                   alert("Backup restored successfully! The page will reload.");
                   window.location.reload();
               } else {
-                  alert("Failed to restore backup. Invalid file format.");
+                  alert("Failed to restore backup. The file must be a valid JSON export.");
               }
           }
       };
       reader.readAsText(file);
+      e.target.value = '';
   };
-
-  // --- Wizard Views ---
 
   const renderCreateMethod = () => (
     <div className="p-6 h-full flex flex-col">
@@ -182,7 +181,6 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
         
         {view === 'create_method' ? renderCreateMethod() : (
             <>
-                {/* List Header */}
                 <div className="p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
                     <div className="bg-blue-600/20 p-2.5 rounded-xl">
@@ -201,9 +199,7 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                 </button>
                 </div>
 
-                {/* List Content */}
                 <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* New Project Card */}
                 <button
                     onClick={() => setView('create_method')}
                     className="group flex flex-col items-center justify-center gap-4 min-h-[160px] rounded-xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-800/30 hover:bg-slate-800/50 transition-all"
@@ -214,7 +210,6 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                     <span className="font-medium text-slate-300 group-hover:text-blue-400">Create New Project</span>
                 </button>
 
-                {/* Project Cards */}
                 {projects.sort((a, b) => b.lastUpdated - a.lastUpdated).map((project) => (
                     <div
                     key={project.id}
@@ -259,7 +254,6 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                         </p>
                     </div>
 
-                    {/* Actions */}
                     <div className="bg-slate-900/50 px-4 py-3 flex items-center justify-end gap-2 border-t border-slate-700/50">
                         <button
                             onClick={(e) => startEditing(e, project)}
@@ -291,7 +285,6 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                 ))}
                 </div>
 
-                {/* Backup / Restore Footer */}
                 <div className="p-4 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                          <div className="p-2 bg-slate-800 rounded-lg border border-slate-700">

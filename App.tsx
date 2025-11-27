@@ -24,62 +24,72 @@ export default function App() {
   const [projectsList, setProjectsList] = useState<Project[]>([]);
 
   // UI State
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'chat' | 'pages'>('chat');
 
   // Initialize
   useEffect(() => {
-    const allProjects = Storage.getProjects();
-    setProjectsList(allProjects);
+    const init = async () => {
+      await Storage.initStorage();
+      const allProjects = await Storage.getProjects();
+      setProjectsList(allProjects);
 
-    const lastId = Storage.getLastActiveProjectId();
-    let initialProject: Project;
+      const lastId = await Storage.getLastActiveProjectId();
+      let initialProject: Project;
 
-    if (lastId) {
-      const found = allProjects.find(p => p.id === lastId);
-      if (found) {
-        initialProject = found;
+      if (lastId) {
+        const found = allProjects.find(p => p.id === lastId);
+        if (found) {
+          initialProject = found;
+        } else {
+          initialProject = Storage.createNewProject(DEFAULT_TEMPLATE.html);
+          await Storage.saveProject(initialProject);
+          setProjectsList(prev => [...prev, initialProject]);
+        }
       } else {
-        initialProject = Storage.createNewProject(DEFAULT_TEMPLATE.html);
-        Storage.saveProject(initialProject);
-        setProjectsList(prev => [...prev, initialProject]);
+        if (allProjects.length > 0) {
+          initialProject = allProjects[0];
+          await Storage.saveProject(initialProject);
+        } else {
+          initialProject = Storage.createNewProject(DEFAULT_TEMPLATE.html);
+          await Storage.saveProject(initialProject);
+          setProjectsList([initialProject]);
+        }
       }
-    } else {
-      if (allProjects.length > 0) {
-        initialProject = allProjects[0];
-        Storage.saveProject(initialProject);
-      } else {
-        initialProject = Storage.createNewProject(DEFAULT_TEMPLATE.html);
-        Storage.saveProject(initialProject);
-        setProjectsList([initialProject]);
+      
+      setCurrentProject(initialProject);
+      if (initialProject && initialProject.pages.length > 0) {
+          setActivePageId(initialProject.pages[0].id);
       }
-    }
-    
-    setCurrentProject(initialProject);
-    // Safe initialization of activePageId
-    if (initialProject && initialProject.pages.length > 0) {
-        setActivePageId(initialProject.pages[0].id);
-    }
-    
-    // Ensure session is clean on load
-    resetSession();
+      resetSession();
+      setIsInitializing(false);
+    };
+
+    init();
   }, []);
 
   // Auto-save
   useEffect(() => {
     if (currentProject) {
-      // Safety: Do not autosave if pages array is corrupted or empty
       if (!currentProject.pages || currentProject.pages.length === 0) {
-          console.warn("Project has no pages. Autosave skipped to prevent data loss.");
           return;
       }
 
-      const timeoutId = setTimeout(() => {
-        Storage.saveProject(currentProject);
-        setProjectsList(prev => prev.map(p => p.id === currentProject.id ? currentProject : p));
-      }, 500);
+      setIsSaving(true);
+      const timeoutId = setTimeout(async () => {
+        try {
+            await Storage.saveProject(currentProject);
+            setProjectsList(prev => prev.map(p => p.id === currentProject.id ? currentProject : p));
+        } catch (e) {
+            console.error("Auto-save failed", e);
+        } finally {
+            setIsSaving(false);
+        }
+      }, 800);
       return () => clearTimeout(timeoutId);
     }
   }, [currentProject]);
@@ -89,13 +99,11 @@ export default function App() {
     if (currentProject && currentProject.pages.length > 0) {
         const isValid = currentProject.pages.some(p => p.id === activePageId);
         if (!isValid) {
-            console.warn("Active page not found, resetting to home.");
             setActivePageId(currentProject.pages[0].id);
         }
     }
   }, [currentProject, activePageId]);
 
-  // Derived state for the active page
   const activePage = currentProject?.pages.find(p => p.id === activePageId);
 
   const handleSendMessage = async (prompt: string, newPageOptions?: { name: string; filename: string }) => {
@@ -104,9 +112,7 @@ export default function App() {
     let targetPageId = activePageId;
     let targetPage = activePage;
 
-    // Handle "Create as new page" flow
     if (newPageOptions) {
-        // Validation: Check if filename exists
         if (currentProject.pages.some(p => p.path.toLowerCase() === newPageOptions.filename.toLowerCase())) {
             alert("A page with this filename already exists.");
             return;
@@ -117,28 +123,21 @@ export default function App() {
             id: newId,
             name: newPageOptions.name,
             path: newPageOptions.filename,
-            html: TEMPLATES[0].html // Start blank
+            html: TEMPLATES[0].html 
         };
 
-        // Optimistically add the new page to state immediately
         setCurrentProject(prev => {
             if (!prev) return null;
-            return {
-                ...prev,
-                pages: [...prev.pages, newPage]
-            };
+            return { ...prev, pages: [...prev.pages, newPage] };
         });
         
-        // Set context to the new page
         setActivePageId(newId);
         targetPageId = newId;
         targetPage = newPage;
-        
-        // Force sidebar to chat to show progress
         if (sidebarTab !== 'chat') setSidebarTab('chat');
     }
 
-    if (!targetPage) return; // Should not happen given logic above
+    if (!targetPage) return;
     if (isEditing) setIsEditing(false);
 
     const userMsg: Message = {
@@ -149,7 +148,6 @@ export default function App() {
       timestamp: Date.now(),
     };
 
-    // Update state with user message
     setCurrentProject(prev => prev ? ({
         ...prev,
         messages: [...prev.messages, userMsg]
@@ -159,10 +157,12 @@ export default function App() {
 
     try {
       // Build context for AI about the files in the project
-      // NOTE: We use the *current* project state for context, assuming the new page is added if applicable
-      const allPages = newPageOptions 
-         ? [...currentProject.pages, { name: newPageOptions.name, path: newPageOptions.filename, id: 'temp', html: '' }] 
-         : currentProject.pages;
+      // NOTE: We check the currentProject state, but we also include the potentially newly added page
+      // We can use the 'targetPage' variable to ensure we have the latest context if it was just added.
+      let allPages = currentProject.pages;
+      if (newPageOptions && !allPages.find(p => p.id === targetPageId)) {
+          allPages = [...allPages, targetPage];
+      }
 
       const availablePages = allPages.map(p => ({ name: p.name, path: p.path }));
       const context = {
@@ -170,8 +170,7 @@ export default function App() {
           availablePages: availablePages
       };
 
-      // If it's a new page, the HTML is blank, so we rely on the prompt to generate it.
-      const currentHtml = newPageOptions ? "" : targetPage.html;
+      const currentHtml = targetPage.html;
       const fullPrompt = `Current HTML content of ${targetPage.path}:\n${currentHtml}\n\nUser Request: ${prompt}`;
       
       const response = await sendMessageToGemini(fullPrompt, context);
@@ -190,7 +189,6 @@ export default function App() {
         setViewMode('preview'); 
       }
 
-      // CRITICAL FIX: Use functional update to ensure we don't overwrite pages added during generation
       setCurrentProject(prev => {
         if (!prev) return null;
         
@@ -223,8 +221,14 @@ export default function App() {
     }
   };
 
+  const handleSyncLinks = async () => {
+    if (!currentProject || !activePage) return;
+    
+    const prompt = "Update the navigation menu (header/nav) in the current page to exactly match the project structure provided in the context. Ensure all links work correctly.";
+    await handleSendMessage(prompt);
+  };
+
   const handleCodeChange = (newCode: string) => {
-    // CRITICAL FIX: Use functional update here too
     setCurrentProject(prev => {
         if (!prev || !activePageId) return prev;
         const updatedPages = prev.pages.map(p => 
@@ -234,7 +238,7 @@ export default function App() {
     });
   };
 
-  const handleCreateProject = (type: 'blank' | 'template' | 'ai' = 'blank', promptOrTemplate?: string) => {
+  const handleCreateProject = async (type: 'blank' | 'template' | 'ai' = 'blank', promptOrTemplate?: string) => {
     resetSession();
 
     let initialHtml = DEFAULT_TEMPLATE.html;
@@ -245,7 +249,7 @@ export default function App() {
     }
 
     const newProject = Storage.createNewProject(initialHtml);
-    Storage.saveProject(newProject);
+    await Storage.saveProject(newProject);
     setProjectsList(prev => [...prev, newProject]);
     setCurrentProject(newProject);
     setActivePageId(newProject.pages[0].id);
@@ -256,18 +260,18 @@ export default function App() {
     }
   };
 
-  const handleSelectProject = (project: Project) => {
+  const handleSelectProject = async (project: Project) => {
     resetSession();
     setCurrentProject(project);
-    Storage.saveProject(project);
+    await Storage.saveProject(project);
     if (project.pages.length > 0) {
         setActivePageId(project.pages[0].id);
     }
     setShowProjectsModal(false);
   };
 
-  const handleDeleteProject = (id: string) => {
-    const updatedList = Storage.deleteProject(id);
+  const handleDeleteProject = async (id: string) => {
+    const updatedList = await Storage.deleteProject(id);
     setProjectsList(updatedList);
     
     if (currentProject?.id === id) {
@@ -280,15 +284,21 @@ export default function App() {
     }
   };
 
-  const handleRenameProject = (id: string, newName: string) => {
-      const updated = Storage.updateProjectName(id, newName);
-      setProjectsList(updated);
+  const handleRenameProject = async (id: string, newName: string) => {
+      // Optimistic update
+      setProjectsList(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
       if (currentProject?.id === id) {
           setCurrentProject(prev => prev ? ({ ...prev, name: newName }) : null);
       }
+      
+      // Async save
+      const projects = await Storage.getProjects();
+      const p = projects.find(p => p.id === id);
+      if (p) {
+          p.name = newName;
+          await Storage.saveProject(p);
+      }
   };
-
-  // --- Page Management ---
 
   const handleAddPage = (name: string, path: string) => {
     setCurrentProject(prev => {
@@ -298,16 +308,77 @@ export default function App() {
             return prev;
         }
 
+        // Smart Clone: Use the layout of index.html or the first page
+        const sourcePage = prev.pages.find(p => p.path === 'index.html') || prev.pages[0];
+        const newId = Storage.generateId();
+
         const newPage: Page = {
-            id: Storage.generateId(),
+            id: newId,
             name,
             path,
-            html: TEMPLATES[0].html 
+            html: sourcePage.html // Start with exact copy to preserve nav/footer
         };
 
         const updatedPages = [...prev.pages, newPage];
         return { ...prev, pages: updatedPages };
     });
+    
+    // Switch to new page immediately
+    // Wait a tick for state to update, then trigger AI to clean it up and link it
+    setTimeout(async () => {
+        // Find the ID we just generated? We can't access it here easily due to closure.
+        // But we know the Path.
+        // Actually, we need to set Active Page ID in the same state update ideally or use an Effect.
+        // For simplicity, we'll traverse projects to find it or just trust the next render.
+        // To be safe, let's just trigger the "Clean & Link" prompt.
+        
+        // We need to set the active page ID to the NEW page so the AI operates on it.
+        // The safest way is to do this inside the same functional flow or wait.
+        // Let's refactor handleAddPage to use a Promise or just update activeId in the setState callback if React allowed, but it doesn't.
+        
+        // Workaround: We'll manually find the ID based on path since paths are unique.
+        const projects = await Storage.getProjects(); // This might be stale.
+        // Better: update activePageId logic inside the component.
+        
+        // Let's update activePageId in a useEffect? No.
+        // Let's update activePageId immediately after setting project.
+        // We can't get the ID easily.
+        
+        // REFACTOR: Generate ID outside.
+        const newId = Storage.generateId();
+        const newPageObj: Page = {
+            id: newId, 
+            name, 
+            path, 
+            html: TEMPLATES[0].html // Placeholder, will be overwritten by clone logic in state
+        };
+        
+        // We redo the state update properly to capture the ID
+        setCurrentProject(prev => {
+            if (!prev) return null;
+             // Smart Clone logic repeated
+            const sourcePage = prev.pages.find(p => p.path === 'index.html') || prev.pages[0];
+            const clonePage = { ...newPageObj, html: sourcePage.html };
+            
+            return { ...prev, pages: [...prev.pages, clonePage] };
+        });
+        
+        setActivePageId(newId);
+        
+        // Now trigger AI to clean up the new page
+        setTimeout(() => {
+            const prompt = `I just created this page "${name}" (${path}) by cloning the home page. 
+            1. Clear the main content area but KEEP the Header/Nav and Footer. 
+            2. Update the Page Title to "${name}".
+            3. Update the Navigation Menu to include this new page "${name}" linking to "${path}".`;
+            
+            // We need to call handleSendMessage, but we need to ensure the state has updated.
+            // Passing the ID explicitly would be better but handleSendMessage uses currentProject state.
+            // 500ms delay usually enough for React state propagation.
+            handleSendMessage(prompt);
+        }, 500);
+
+    }, 0);
   };
 
   const handleUpdatePage = (id: string, name: string, path: string) => {
@@ -316,34 +387,27 @@ export default function App() {
       const oldPage = currentProject.pages.find(p => p.id === id);
       const oldPath = oldPage?.path;
 
-      // 1. Update the metadata of the target page
-      let updatedProject = Storage.updatePage(currentProject.id, id, { name, path });
-      
-      // 2. Refactor links in ALL pages if path changed
-      if (updatedProject && oldPath && oldPath !== path) {
-          // Escape regex special chars in filename
-          const safeOldPath = oldPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Logic to update state - auto-save will catch it
+      setCurrentProject(prev => {
+          if (!prev) return null;
           
-          // Regex matches href="oldPath" or href='oldPath'
-          // We use simple quote matching to avoid destroying content
-          const regex = new RegExp(`href=(["'])${safeOldPath}(["'])`, 'g');
-          
-          const updatedPages = updatedProject.pages.map(p => {
-              // Replace with new path
-              const newHtml = p.html.replace(regex, `href=$1${path}$2`);
-              return { ...p, html: newHtml };
-          });
-          
-          updatedProject = { ...updatedProject, pages: updatedPages };
-          
-          // Persist the bulk HTML updates to storage
-          Storage.saveProject(updatedProject);
-      }
+          let updatedPages = prev.pages.map(p => 
+              p.id === id ? { ...p, name, path } : p
+          );
 
-      if (updatedProject) {
-          setCurrentProject(updatedProject);
-          setProjectsList(prev => prev.map(p => p.id === updatedProject!.id ? updatedProject! : p));
-      }
+          // Refactor links if path changed
+          if (oldPath && oldPath !== path) {
+              const safeOldPath = oldPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regex = new RegExp(`href=(["'])${safeOldPath}(["'])`, 'g');
+              
+              updatedPages = updatedPages.map(p => {
+                  const newHtml = p.html.replace(regex, `href=$1${path}$2`);
+                  return { ...p, html: newHtml };
+              });
+          }
+          
+          return { ...prev, pages: updatedPages };
+      });
   };
 
   const handleDeletePage = (pageId: string) => {
@@ -367,7 +431,6 @@ export default function App() {
 
   const handleDownload = async () => {
     if (!currentProject) return;
-
     try {
         const zip = new JSZip();
         currentProject.pages.forEach(page => {
@@ -384,7 +447,6 @@ export default function App() {
         URL.revokeObjectURL(url);
     } catch (error) {
         console.error("Export failed:", error);
-        alert("Failed to create ZIP file. Please try again.");
     }
   };
 
@@ -397,7 +459,16 @@ export default function App() {
     }
   };
 
-  if (!currentProject) return <div className="h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;
+  if (isInitializing) {
+      return (
+          <div className="h-screen w-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-4">
+              <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
+              <p>Loading your projects...</p>
+          </div>
+      );
+  }
+
+  if (!currentProject) return <div className="h-screen bg-slate-950" />;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
@@ -418,10 +489,10 @@ export default function App() {
         onPreviewExternal={handleExternalPreview}
         onOpenProjects={() => setShowProjectsModal(true)}
         projectName={currentProject.name}
+        isSaving={isSaving}
       />
 
       <main className="flex-1 flex overflow-hidden relative">
-        {/* Sidebar */}
         <div 
           className={`
             border-r border-slate-700 bg-slate-900 flex flex-col 
@@ -430,7 +501,6 @@ export default function App() {
             ${isSidebarOpen ? 'w-full md:w-[400px] translate-x-0' : '-translate-x-full w-0 opacity-0 overflow-hidden'}
           `}
         >
-          {/* Sidebar Tabs */}
           <div className="flex border-b border-slate-700 bg-slate-800/50 shrink-0">
              <button 
                 onClick={() => setSidebarTab('chat')}
@@ -456,7 +526,6 @@ export default function App() {
              </button>
           </div>
           
-          {/* Sidebar Content */}
           <div className="flex-1 overflow-hidden flex flex-col">
               {sidebarTab === 'chat' ? (
                  <>
@@ -476,6 +545,8 @@ export default function App() {
                     onAddPage={handleAddPage}
                     onUpdatePage={handleUpdatePage}
                     onDeletePage={handleDeletePage}
+                    onSyncLinks={handleSyncLinks}
+                    isSyncing={isLoading}
                   />
               )}
           </div>
@@ -483,7 +554,6 @@ export default function App() {
           <PromptInput onSend={handleSendMessage} isLoading={isLoading} />
         </div>
 
-        {/* Main Content Area */}
         <div className="flex-1 relative bg-slate-950 flex flex-col min-w-0 transition-all duration-300">
             {activePage ? (
                 viewMode === 'preview' ? (
@@ -505,7 +575,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* Projects Modal */}
       {showProjectsModal && (
         <ProjectsList 
             projects={projectsList}

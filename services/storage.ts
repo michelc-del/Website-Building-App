@@ -1,18 +1,44 @@
-import { Project, Message, Page } from '../types';
+import { get, set } from 'idb-keyval';
+import { Project, Page } from '../types';
 
 const STORAGE_KEY = 'gemini_web_architect_projects';
 const ACTIVE_ID_KEY = 'gemini_web_architect_active_id';
 
 export const generateId = () => Math.random().toString(36).substr(2, 9);
 
-export const getProjects = (): Project[] => {
+// Initialize storage and migrate from localStorage if needed
+export const initStorage = async (): Promise<void> => {
+    try {
+        const existingIdbData = await get(STORAGE_KEY);
+        if (!existingIdbData) {
+            console.log("Checking for legacy data in localStorage...");
+            const lsData = localStorage.getItem(STORAGE_KEY);
+            if (lsData) {
+                const projects = JSON.parse(lsData);
+                await set(STORAGE_KEY, projects);
+                console.log("Migrated projects to IndexedDB");
+                
+                const activeId = localStorage.getItem(ACTIVE_ID_KEY);
+                if (activeId) {
+                    await set(ACTIVE_ID_KEY, activeId);
+                }
+                
+                // Optional: Clear LS after successful migration
+                // localStorage.removeItem(STORAGE_KEY);
+                // localStorage.removeItem(ACTIVE_ID_KEY);
+            }
+        }
+    } catch (e) {
+        console.error("Storage initialization failed", e);
+    }
+};
+
+export const getProjects = async (): Promise<Project[]> => {
   try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    const projects: Project[] = data ? JSON.parse(data) : [];
+    const projects = (await get<Project[]>(STORAGE_KEY)) || [];
     
-    // Migration: If old projects exist without pages, or pages array is empty/malformed, repair them.
+    // Migration/Repair logic
     return projects.map(p => {
-      // Check if pages is missing OR if it's not an array OR if it's an empty array
       if (!p.pages || !Array.isArray(p.pages) || p.pages.length === 0) {
         return {
           ...p,
@@ -32,18 +58,15 @@ export const getProjects = (): Project[] => {
   }
 };
 
-export const saveProject = (project: Project): void => {
-  // SAFETY CHECK: Never save a project that has 0 pages. 
-  // This prevents bugs from wiping out project data with an empty state.
+export const saveProject = async (project: Project): Promise<void> => {
   if (!project.pages || project.pages.length === 0) {
       console.warn("Attempted to save project with no pages. Aborting save to protect data.");
       return;
   }
 
-  const projects = getProjects();
+  const projects = await getProjects();
   const index = projects.findIndex(p => p.id === project.id);
   
-  // Ensure we don't save the deprecated root html if pages exist
   const projectToSave = { ...project, lastUpdated: Date.now() };
   if (projectToSave.pages.length > 0) {
      delete projectToSave.html;
@@ -55,24 +78,25 @@ export const saveProject = (project: Project): void => {
     projects.push(projectToSave);
   }
   
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-  localStorage.setItem(ACTIVE_ID_KEY, project.id);
+  await set(STORAGE_KEY, projects);
+  await set(ACTIVE_ID_KEY, project.id);
 };
 
-export const deleteProject = (id: string): Project[] => {
-  const projects = getProjects().filter(p => p.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+export const deleteProject = async (id: string): Promise<Project[]> => {
+  let projects = await getProjects();
+  projects = projects.filter(p => p.id !== id);
+  await set(STORAGE_KEY, projects);
   
-  const activeId = localStorage.getItem(ACTIVE_ID_KEY);
+  const activeId = await getLastActiveProjectId();
   if (activeId === id) {
-    localStorage.removeItem(ACTIVE_ID_KEY);
+    await set(ACTIVE_ID_KEY, null);
   }
   
   return projects;
 };
 
-export const getLastActiveProjectId = (): string | null => {
-  return localStorage.getItem(ACTIVE_ID_KEY);
+export const getLastActiveProjectId = async (): Promise<string | null> => {
+  return await get<string>(ACTIVE_ID_KEY) || null;
 };
 
 export const createNewProject = (defaultHtml: string): Project => {
@@ -92,56 +116,43 @@ export const createNewProject = (defaultHtml: string): Project => {
   return newProject;
 };
 
-export const updateProjectName = (id: string, name: string): Project[] => {
-    const projects = getProjects();
-    const index = projects.findIndex(p => p.id === id);
-    if (index >= 0) {
-        projects[index].name = name;
-        projects[index].lastUpdated = Date.now();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-    }
-    return projects;
-};
-
-export const updatePage = (projectId: string, pageId: string, updates: Partial<Page>): Project | null => {
-    const projects = getProjects();
-    const pIndex = projects.findIndex(p => p.id === projectId);
-    
-    if (pIndex >= 0) {
-        const project = projects[pIndex];
-        const pageIndex = project.pages.findIndex(p => p.id === pageId);
-        
-        if (pageIndex >= 0) {
-            project.pages[pageIndex] = { ...project.pages[pageIndex], ...updates };
-            project.lastUpdated = Date.now();
-            projects[pIndex] = project;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-            return project;
-        }
-    }
-    return null;
-};
-
 // --- Backup & Restore ---
 
-export const exportAllData = (): string => {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data || '[]';
+export const exportAllData = async (): Promise<string> => {
+    const projects = await getProjects();
+    return JSON.stringify(projects, null, 2);
 };
 
-export const importData = (jsonString: string): boolean => {
+export const importData = async (jsonString: string): Promise<boolean> => {
     try {
-        const projects = JSON.parse(jsonString);
-        if (!Array.isArray(projects)) throw new Error("Invalid format");
-        
-        // Basic validation
-        const valid = projects.every(p => p.id && p.name && Array.isArray(p.pages));
-        if (!valid) throw new Error("Invalid project structure");
+        if (!jsonString || typeof jsonString !== 'string') return false;
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+        let projects: any;
+        try {
+            projects = JSON.parse(jsonString);
+        } catch (e) {
+            console.error("JSON Parse Error", e);
+            return false;
+        }
+
+        if (!Array.isArray(projects)) {
+             if (projects && typeof projects === 'object' && projects.id) {
+                 projects = [projects];
+             } else {
+                 return false;
+             }
+        }
+        
+        const valid = projects.every((p: any) => p && typeof p === 'object' && p.id && p.name);
+        
+        if (!valid) {
+            return false;
+        }
+
+        await set(STORAGE_KEY, projects);
         return true;
     } catch (e) {
-        console.error("Import failed", e);
+        console.error("Import logic failed", e);
         return false;
     }
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, Smartphone, Tablet, Monitor, Code, Eye, Download, Pencil, Check, ExternalLink, PanelLeftClose, PanelLeftOpen, FolderOpen } from 'lucide-react';
+import { LayoutTemplate, Smartphone, Tablet, Monitor, Code, Eye, Download, Pencil, Check, ExternalLink, PanelLeftClose, PanelLeftOpen, FolderOpen, Cloud, RefreshCw } from 'lucide-react';
 import { DeviceMode, Page } from '../types';
 
 interface HeaderProps {
@@ -16,6 +16,7 @@ interface HeaderProps {
   onPreviewExternal: () => void;
   onOpenProjects: () => void;
   projectName: string;
+  isSaving?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -31,7 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
   setIsSidebarOpen,
   onPreviewExternal,
   onOpenProjects,
-  projectName
+  projectName,
+  isSaving
 }) => {
   return (
     <header className="h-16 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4 md:px-6 z-10 shrink-0">
@@ -52,18 +54,31 @@ export const Header: React.FC<HeaderProps> = ({
             <h1 className="hidden md:block font-bold text-lg leading-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
               Web Architect
             </h1>
-            <div 
-                onClick={onOpenProjects}
-                className="text-xs text-slate-400 flex items-center gap-1 hover:text-blue-400 cursor-pointer transition-colors"
-            >
-                <FolderOpen className="w-3 h-3" />
-                <span className="max-w-[150px] truncate font-medium">{projectName}</span>
+            <div className="flex items-center gap-2">
+                <div 
+                    onClick={onOpenProjects}
+                    className="text-xs text-slate-400 flex items-center gap-1 hover:text-blue-400 cursor-pointer transition-colors"
+                >
+                    <FolderOpen className="w-3 h-3" />
+                    <span className="max-w-[150px] truncate font-medium">{projectName}</span>
+                </div>
+                {isSaving !== undefined && (
+                   <div className="text-[10px] text-slate-500 flex items-center gap-1" title={isSaving ? "Saving..." : "Saved to device"}>
+                       {isSaving ? (
+                           <>
+                             <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+                             <span className="hidden sm:inline">Saving...</span>
+                           </>
+                       ) : (
+                           <Cloud className="w-3 h-3 text-green-400" />
+                       )}
+                   </div>
+                )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Device Toggles - Centered */}
       <div className={`hidden lg:flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700 transition-opacity duration-200 ${isEditing ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
         <button
           onClick={() => setDeviceMode('mobile')}
@@ -88,7 +103,6 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* View Toggles & Actions */}
       <div className="flex items-center gap-2 md:gap-3">
         
         {viewMode === 'preview' && hasCode && (
