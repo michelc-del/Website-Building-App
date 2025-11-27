@@ -2,7 +2,7 @@ import React, { useState, KeyboardEvent, useRef, useEffect } from 'react';
 import { Send, Sparkles, Loader2, Paperclip, X, FileText, PlusCircle } from 'lucide-react';
 
 interface PromptInputProps {
-  onSend: (prompt: string, newPageOptions?: { name: string; filename: string }) => void;
+  onSend: (prompt: string, newPageOptions?: { name: string; filename: string; initialHtml?: string }) => void;
   isLoading: boolean;
 }
 

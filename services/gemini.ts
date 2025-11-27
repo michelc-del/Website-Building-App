@@ -15,7 +15,8 @@ RULES:
 5. Use Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"></script>.
 6. Use FontAwesome via CDN: <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">.
 7. Use "https://picsum.photos/width/height" for placeholder images.
-8. Use semantic HTML5 tags (header, nav, section, article, footer).
+8. Use semantic HTML5 tags (header, nav, section, article, footer). 
+   **CRITICAL**: You MUST wrap the top navigation bar in a <header> tag and the footer in a <footer> tag. This is required for the system to link pages automatically.
 9. Do not include any explanation before or after the HTML code when generating code.
 
 MULTI-PAGE AWARENESS & NAVIGATION:

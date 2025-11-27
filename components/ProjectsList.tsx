@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Project } from '../types';
 import { TEMPLATES } from '../services/templates';
-import { Folder, Trash2, Plus, Clock, FileCode, Edit2, X, Check, Sparkles, Layout, ChevronRight, ArrowLeft, Download, Upload, Save } from 'lucide-react';
+import { Folder, Trash2, Plus, Clock, FileCode, Edit2, X, Check, Sparkles, Layout, ChevronRight, ArrowLeft, Download, Upload, Save, Stethoscope } from 'lucide-react';
 import * as Storage from '../services/storage';
 
 interface ProjectsListProps {
@@ -12,6 +12,7 @@ interface ProjectsListProps {
   onDeleteProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onClose: () => void;
+  onRecoverData: () => void;
 }
 
 export const ProjectsList: React.FC<ProjectsListProps> = ({
@@ -21,7 +22,8 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
   onCreateProject,
   onDeleteProject,
   onRenameProject,
-  onClose
+  onClose,
+  onRecoverData
 }) => {
   const [view, setView] = useState<'list' | 'create_method'>('list');
   const [aiPrompt, setAiPrompt] = useState('');
@@ -296,6 +298,14 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                          </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        <button 
+                            onClick={onRecoverData}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-900/30 hover:bg-blue-900/50 border border-blue-500/30 text-blue-400 rounded-lg text-xs font-medium transition-colors mr-2"
+                            title="Perform a Deep Scan of browser storage to find missing projects"
+                        >
+                            <Stethoscope className="w-3 h-3" />
+                            Deep Scan Recovery
+                        </button>
                         <button 
                             onClick={handleExport}
                             className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium text-slate-300 hover:text-white transition-colors"

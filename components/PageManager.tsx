@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Page } from '../types';
-import { File, Home, Trash2, Plus, Edit2, X, AlertCircle, RefreshCw } from 'lucide-react';
+import { File, Home, Trash2, Plus, Edit2, X, AlertCircle } from 'lucide-react';
 
 interface PageManagerProps {
   pages: Page[];
@@ -9,8 +9,6 @@ interface PageManagerProps {
   onAddPage: (name: string, path: string) => void;
   onUpdatePage: (id: string, name: string, path: string) => void;
   onDeletePage: (id: string) => void;
-  onSyncLinks?: () => void;
-  isSyncing?: boolean;
 }
 
 export const PageManager: React.FC<PageManagerProps> = ({
@@ -19,9 +17,7 @@ export const PageManager: React.FC<PageManagerProps> = ({
   onSelectPage,
   onAddPage,
   onUpdatePage,
-  onDeletePage,
-  onSyncLinks,
-  isSyncing
+  onDeletePage
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newPageName, setNewPageName] = useState('');
@@ -117,20 +113,9 @@ export const PageManager: React.FC<PageManagerProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-900">
       
-      {/* Header with Sync Button */}
+      {/* Header */}
       <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Structure</span>
-          {onSyncLinks && (
-              <button 
-                onClick={onSyncLinks}
-                disabled={isSyncing}
-                className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors flex items-center gap-1.5"
-                title="Update Navigation Links"
-              >
-                  <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-blue-500' : ''}`} />
-                  <span className="text-[10px]">Sync Nav</span>
-              </button>
-          )}
       </div>
 
       {/* Page List */}

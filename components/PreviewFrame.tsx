@@ -7,9 +7,10 @@ interface PreviewFrameProps {
   deviceMode: DeviceMode;
   isEditing: boolean;
   onHtmlChange: (html: string) => void;
+  onNavigate: (path: string) => void;
 }
 
-export const PreviewFrame: React.FC<PreviewFrameProps> = ({ html, deviceMode, isEditing, onHtmlChange }) => {
+export const PreviewFrame: React.FC<PreviewFrameProps> = ({ html, deviceMode, isEditing, onHtmlChange, onNavigate }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -22,6 +23,17 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({ html, deviceMode, is
     }
   };
 
+  // Listen for navigation messages from the iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'GEMINI_NAVIGATE') {
+            onNavigate(event.data.path);
+        }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onNavigate]);
+
   // Initial render of HTML
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -31,7 +43,7 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({ html, deviceMode, is
         doc.open();
         doc.write(html);
         
-        // Inject styles for edit mode
+        // Inject styles for edit mode and Navigation Interceptor
         doc.write(`
           <style>
             .gemini-edit-mode-active *:hover {
@@ -48,6 +60,23 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({ html, deviceMode, is
             }
           </style>
           <script>
+            // Navigation Interceptor
+            document.addEventListener('click', (e) => {
+                // If in edit mode, let the CSS pointer-events handle it (or ignore)
+                if (document.body.classList.contains('gemini-edit-mode-active')) return;
+
+                const link = e.target.closest('a');
+                if (link) {
+                    const href = link.getAttribute('href');
+                    // Check if it's an internal link (not http/https, not anchor #, not mailto)
+                    if (href && !href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('javascript:')) {
+                        e.preventDefault();
+                        window.parent.postMessage({ type: 'GEMINI_NAVIGATE', path: href }, '*');
+                    }
+                }
+            });
+
+            // Edit Mode Toggle
             window.setGeminiEditMode = (active) => {
                if (active) {
                  document.body.classList.add('gemini-edit-mode-active');
